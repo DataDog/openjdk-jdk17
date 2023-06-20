@@ -3,7 +3,6 @@ image: alpine
 stages: [trigger]
 
 build:
-  when: manual
   stage: trigger
   variables:
     JDK_VERSION: "17"
