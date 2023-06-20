@@ -18,6 +18,8 @@ jobs:
 
     - name: Pull latest changes from upstream
       run: |
+        git config --global user.email "sync@datadoghq.com"
+        git config --global user.name "Datadog Syncup Service"
         git remote add upstream https://github.com/openjdk/jdk17u-dev.git
         git fetch upstream
         git pull --rebase upstream master
