@@ -24,7 +24,7 @@ jobs:
         git remote add upstream https://github.com/openjdk/jdk17u-dev.git
         git fetch upstream
         git checkout -b upstream-master upstream/master
-        git checkout --track origin/master
+        git checkout master
         git merge upstream-master
 
     - name: Push changes to downstream
