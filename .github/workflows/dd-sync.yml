@@ -20,10 +20,10 @@ jobs:
       run: |
         git remote add upstream https://github.com/openjdk/jdk17u-dev.git
         git fetch upstream
-        git pull --rebase upstream main
+        git pull --rebase upstream master
 
     - name: Push changes to downstream
       uses: ad-m/github-push-action@master
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
-        branch: main
+        branch: master
