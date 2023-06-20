@@ -14,6 +14,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v2
       with:
+        persist-credentials: false
         fetch-depth: 0
 
     - name: Pull latest changes from upstream
@@ -22,10 +23,12 @@ jobs:
         git config --global user.name "Datadog Syncup Service"
         git remote add upstream https://github.com/openjdk/jdk17u-dev.git
         git fetch upstream
-        git pull --rebase upstream master
+        git checkout -b upstream-master upstream/master
+        git checkout --track origin/master
+        git merge upstream-master
 
     - name: Push changes to downstream
       uses: ad-m/github-push-action@master
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
+        github_token: ${{ secrets.GH_PAT }}
         branch: master
