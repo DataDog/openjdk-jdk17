@@ -1,0 +1,29 @@
+# .github/workflows/sync-upstream.yml
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '22 14 * * *' # Runs every day at 14:15 UTC
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: Pull latest changes from upstream
+      run: |
+        git remote add upstream https://github.com/openjdk/jdk17u-dev.git
+        git fetch upstream
+        git pull --rebase upstream main
+
+    - name: Push changes to downstream
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        branch: main
