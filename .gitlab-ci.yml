@@ -1,0 +1,31 @@
+image: alpine
+
+stages: [trigger]
+
+build:
+  when: manual
+  stage: trigger
+  variables:
+    JDK_VERSION: "17"
+    DEBUG_LEVEL: "fastdebug"
+    HASH: "${CI_COMMIT_SHORT_SHA}"
+  trigger:
+    project: DataDog/openjdk-build
+    strategy: depend
+    branch: main
+    forward:
+      pipeline_variables: true
+
+test:
+  stage: trigger
+  needs: [build]
+  variables:
+    JDK_VERSION: "17"
+    DEBUG_LEVEL: "fastdebug"
+    HASH: "${CI_COMMIT_SHORT_SHA}"
+  trigger:
+    project: DataDog/apm-reliability/async-profiler-build
+    strategy: depend
+    branch: main
+    forward:
+      pipeline_variables: true
