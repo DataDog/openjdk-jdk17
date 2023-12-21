@@ -42,6 +42,10 @@ on:
       make-arguments:
         description: 'Additional make arguments'
         required: false
+      test-spec:
+        description: "Test specification as it would be used with 'make test TEST=<spec>'"
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -281,6 +285,7 @@ jobs:
       platform: linux-x64
       bootjdk-platform: linux-x64
       runs-on: ubuntu-22.04
+      test-spec: ${{ github.event.inputs.test-spec }}
 
   test-linux-x86:
     name: linux-x86
@@ -291,6 +296,7 @@ jobs:
       platform: linux-x86
       bootjdk-platform: linux-x64
       runs-on: ubuntu-22.04
+      test-spec: ${{ github.event.inputs.test-spec }}
 
   test-macos-x64:
     name: macos-x64
@@ -301,6 +307,7 @@ jobs:
       platform: macos-x64
       bootjdk-platform: macos-x64
       runs-on: macos-11
+      test-spec: ${{ github.event.inputs.test-spec }}
 
   test-windows-x64:
     name: windows-x64
@@ -311,6 +318,7 @@ jobs:
       platform: windows-x64
       bootjdk-platform: windows-x64
       runs-on: windows-2019
+      test-spec: ${{ github.event.inputs.test-spec }}
 
   # Remove bundles so they are not misconstrued as binary distributions from the JDK project
   remove-bundles:
