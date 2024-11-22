@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,29 +21,22 @@
  * questions.
  */
 
-/*
- * @test
- * @bug 8259428
- * @library /test/lib
- * @summary Verify X509Certificate.getSigAlgParams() returns new array each
- *          time it is called
- * @modules java.base/sun.security.tools.keytool java.base/sun.security.x509
- */
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
 
-import java.security.cert.X509Certificate;
-import jdk.test.lib.security.SecurityUtils;
-import sun.security.tools.keytool.CertAndKeyGen;
-import sun.security.x509.X500Name;
-
-public class GetSigAlgParams {
-
-    public static void main(String[] args) throws Exception {
-
-        CertAndKeyGen cakg = new CertAndKeyGen("RSASSA-PSS", "RSASSA-PSS");
-        cakg.generate(SecurityUtils.getTestKeySize("RSA"));
-        X509Certificate c = cakg.getSelfCertificate(new X500Name("CN=Me"), 100);
-        if (c.getSigAlgParams() == c.getSigAlgParams()) {
-            throw new Exception("Encoded params are the same byte array");
+public class ChildProcessAppLauncher {
+    public static void main(String[] args) throws IOException, InterruptedException {
+        if (args.length == 1 && "noexit".equals(args[0])) {
+            var lock = new Object();
+            synchronized (lock) {
+                lock.wait();
+            }
+        } else {
+            var childPath = System.getProperty("jpackage.app-path"); // get the path to the current jpackage app launcher
+            ProcessBuilder processBuilder = new ProcessBuilder(childPath, "noexit"); //ChildProcessAppLauncher acts as third party app
+            Process process = processBuilder.start();
+            System.out.println("Child id=" + process.pid());
         }
     }
 }
