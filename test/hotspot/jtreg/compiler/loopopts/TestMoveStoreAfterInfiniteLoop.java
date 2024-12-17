@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2008, 2024 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, Red Hat, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,34 +21,24 @@
  * questions.
  */
 
-import javax.swing.JColorChooser;
-import javax.swing.JPanel;
-
 /*
  * @test
- * @bug 4759306
- * @library /java/awt/regtesthelpers
- * @build PassFailJFrame
- * @summary Checks if JColorChooser.setPreviewPanel removes the old one
- * @run main/manual Test4759306
+ * @bug 8338100
+ * @summary C2: assert(!n_loop->is_member(get_loop(lca))) failed: control must not be back in the loop
+ * @compile MoveStoreAfterInfiniteLoop.jasm
+ * @run main/othervm -Xcomp -XX:-TieredCompilation -XX:CompileOnly=TestMoveStoreAfterInfiniteLoop::test
+ *                   -XX:CompileCommand=inline,MoveStoreAfterInfiniteLoop::test TestMoveStoreAfterInfiniteLoop
  */
-public class Test4759306 {
 
-    public static void main(String[] args) throws Exception {
-        PassFailJFrame.builder()
-                .title("Test4759306")
-                .instructions("Check that there is no panel titled \"Preview\" in the JColorChooser.")
-                .rows(5)
-                .columns(40)
-                .testTimeOut(10)
-                .splitUIRight(Test4759306::createColorChooser)
-                .build()
-                .awaitAndCheck();
+public class TestMoveStoreAfterInfiniteLoop {
+    public static void main(String[] args) {
+        new MoveStoreAfterInfiniteLoop();
+        test(false);
     }
 
-    private static JColorChooser createColorChooser() {
-        JColorChooser chooser = new JColorChooser();
-        chooser.setPreviewPanel(new JPanel());
-        return chooser;
+    private static void test(boolean flag) {
+        if (flag) {
+            MoveStoreAfterInfiniteLoop.test();
+        }
     }
 }

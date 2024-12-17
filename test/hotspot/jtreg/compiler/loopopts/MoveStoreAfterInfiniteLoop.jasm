@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012, 2020 SAP SE. All rights reserved.
+ * Copyright (c) 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -20,19 +19,56 @@
  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
  * or visit www.oracle.com if you need additional information or have any
  * questions.
- *
  */
 
-#include "precompiled.hpp"
-#include "opto/compile.hpp"
-#include "opto/node.hpp"
-#include "runtime/globals.hpp"
-#include "runtime/globals_extension.hpp"
-#include "runtime/vm_version.hpp"
-#include "utilities/debug.hpp"
+super public class MoveStoreAfterInfiniteLoop
+{
+  static Field a:I;
+  static Field b:I;
+  static Field c:S;
 
-// Processor dependent initialization of C2 compiler for ppc.
+  public Method "<init>":"()V"
+	stack 1 locals 1
+  {
+		aload_0;
+		invokespecial	Method java/lang/Object."<init>":"()V";
+		return;
+  }
 
-void Compile::pd_compiler2_init() {
-  guarantee(CodeEntryAlignment >= InteriorEntryAlignment, "");
+public static Method test:"()V"
+    stack 3 locals 3
+  {
+    LTOP:
+        iconst_0;
+        istore_1;
+
+    LOUTER:
+        iload_1;
+        bipush    10;
+        if_icmpge    LTOP;
+
+        getstatic    Field c:"S";
+        putstatic    Field a:"I";
+
+        iconst_0;
+        istore_2;
+
+    LINNER:
+        iload_2;
+        iconst_2;
+        if_icmpge    LBOTTOM;
+
+        getstatic    Field b:"I";
+        i2s;
+        putstatic    Field c:"S";
+
+        iinc    2, 1;
+
+        goto    LINNER;
+
+    LBOTTOM:
+        iinc    1, 1;
+
+        goto    LOUTER;
+  }
 }
