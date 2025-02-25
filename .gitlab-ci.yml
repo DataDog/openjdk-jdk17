@@ -11,7 +11,7 @@ build:
   trigger:
     project: DataDog/openjdk-build
     strategy: depend
-    branch: main
+    branch: jb/multi_arch
     forward:
       pipeline_variables: true
 
