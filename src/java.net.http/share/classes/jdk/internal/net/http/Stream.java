@@ -184,10 +184,9 @@ class Stream<T> extends ExchangeImpl<T> {
                 if (subscriber == null) {
                     // can't process anything yet
                     return;
-                } else {
-                    if (debug.on()) debug.log("subscribing user subscriber");
-                    subscriber.onSubscribe(userSubscription);
                 }
+                if (debug.on()) debug.log("subscribing user subscriber");
+                subscriber.onSubscribe(userSubscription);
             }
             while (!inputQ.isEmpty()) {
                 Http2Frame frame = inputQ.peek();
@@ -283,6 +282,7 @@ class Stream<T> extends ExchangeImpl<T> {
         if (debug.on()) debug.log("nullBody: streamid=%d", streamid);
         // We should have an END_STREAM data frame waiting in the inputQ.
         // We need a subscriber to force the scheduler to process it.
+        assert pendingResponseSubscriber == null;
         pendingResponseSubscriber = HttpResponse.BodySubscribers.replacing(null);
         sched.runOrSchedule();
     }
@@ -352,12 +352,12 @@ class Stream<T> extends ExchangeImpl<T> {
     // The Http2StreamResponseSubscriber is registered with the HttpClient
     // to ensure that it gets completed if the SelectorManager aborts due
     // to unexpected exceptions.
-    private void registerResponseSubscriber(Http2StreamResponseSubscriber<?> subscriber) {
-        client().registerSubscriber(subscriber);
+    private boolean registerResponseSubscriber(Http2StreamResponseSubscriber<?> subscriber) {
+        return client().registerSubscriber(subscriber);
     }
 
-    private void unregisterResponseSubscriber(Http2StreamResponseSubscriber<?> subscriber) {
-        client().unregisterSubscriber(subscriber);
+    private boolean unregisterResponseSubscriber(Http2StreamResponseSubscriber<?> subscriber) {
+        return client().unregisterSubscriber(subscriber);
     }
 
     @Override
@@ -419,7 +419,7 @@ class Stream<T> extends ExchangeImpl<T> {
             responseBodyCF.completeExceptionally(t);
         }
 
-        // ensure that the body subscriber will be subsribed and onError() is
+        // ensure that the body subscriber will be subscribed and onError() is
         // invoked
         pendingResponseSubscriber = bodySubscriber;
         sched.runOrSchedule(); // in case data waiting already to be processed, or error
@@ -475,8 +475,14 @@ class Stream<T> extends ExchangeImpl<T> {
                 receiveDataFrame(new DataFrame(streamid, DataFrame.END_STREAM, List.of()));
             }
         } else if (frame instanceof DataFrame) {
-            if (cancelled) connection.dropDataFrame((DataFrame) frame);
-            else receiveDataFrame((DataFrame) frame);
+            if (cancelled) {
+                if (debug.on()) {
+                    debug.log("request cancelled or stream closed: dropping data frame");
+                }
+                connection.dropDataFrame((DataFrame) frame);
+            } else {
+                receiveDataFrame((DataFrame) frame);
+            }
         } else {
             if (!cancelled) otherFrame(frame);
         }
@@ -593,9 +599,9 @@ class Stream<T> extends ExchangeImpl<T> {
             Flow.Subscriber<?> subscriber =
                     responseSubscriber == null ? pendingResponseSubscriber : responseSubscriber;
             if (response == null && subscriber == null) {
-                // we haven't receive the headers yet, and won't receive any!
+                // we haven't received the headers yet, and won't receive any!
                 // handle reset now.
-                handleReset(frame, subscriber);
+                handleReset(frame, null);
             } else {
                 // put it in the input queue in order to read all
                 // pending data frames first. Indeed, a server may send
@@ -1338,10 +1344,24 @@ class Stream<T> extends ExchangeImpl<T> {
                 }
             }
         }
+
         if (closing) { // true if the stream has not been closed yet
-            if (responseSubscriber != null || pendingResponseSubscriber != null)
+            if (responseSubscriber != null || pendingResponseSubscriber != null) {
+                if (debug.on())
+                    debug.log("stream %s closing due to %s", streamid, (Object)errorRef.get());
                 sched.runOrSchedule();
+            } else {
+                if (debug.on())
+                    debug.log("stream %s closing due to %s before subscriber registered",
+                        streamid, (Object)errorRef.get());
+            }
+        } else {
+            if (debug.on()) {
+                debug.log("stream %s already closed due to %s",
+                        streamid, (Object)errorRef.get());
+            }
         }
+
         completeResponseExceptionally(e);
         if (!requestBodyCF.isDone()) {
             requestBodyCF.completeExceptionally(errorRef.get()); // we may be sending the body..
@@ -1385,6 +1405,20 @@ class Stream<T> extends ExchangeImpl<T> {
         if (debug.on()) debug.log("close stream %d", streamid);
         Log.logTrace("Closing stream {0}", streamid);
         connection.closeStream(streamid);
+        var s = responseSubscriber == null
+                ? pendingResponseSubscriber
+                : responseSubscriber;
+        if (debug.on()) debug.log("subscriber is %s", s);
+        if (s instanceof Http2StreamResponseSubscriber<?> sw) {
+            if (debug.on()) debug.log("closing response subscriber stream %s", streamid);
+            // if the subscriber has already completed,
+            // there is nothing to do...
+            if (!sw.completed()) {
+                // otherwise make sure it will be completed
+                var cause = errorRef.get();
+                sw.complete(cause == null ? new IOException("stream closed") : cause);
+            }
+        }
         Log.logTrace("Stream {0} closed", streamid);
     }
 
@@ -1658,22 +1692,15 @@ class Stream<T> extends ExchangeImpl<T> {
         }
 
         @Override
-        protected void onSubscribed() {
+        protected void register() {
             registerResponseSubscriber(this);
         }
 
         @Override
-        protected void complete(Throwable t) {
-            try {
-                unregisterResponseSubscriber(this);
-            } finally {
-                super.complete(t);
-            }
-        }
-        @Override
-        protected void onCancel() {
+        protected void unregister() {
             unregisterResponseSubscriber(this);
         }
+
     }
 
     private static final VarHandle STREAM_STATE;

@@ -148,7 +148,7 @@ final class HttpClientImpl extends HttpClient implements Trackable {
      * is the SelectorManager thread. If the current thread is not
      * the selector manager thread the given task is executed inline.
      */
-    final static class DelegatingExecutor implements Executor {
+    static final class DelegatingExecutor implements Executor {
         private final BooleanSupplier isInSelectorThread;
         private final Executor delegate;
         private final BiConsumer<Runnable, Throwable> errorHandler;
@@ -355,6 +355,7 @@ final class HttpClientImpl extends HttpClient implements Trackable {
     // nature of the API, we also need to wait until all pending operations
     // have completed.
     private final WeakReference<HttpClientFacade> facadeRef;
+    private final WeakReference<HttpClientImpl> implRef;
 
     private final ConcurrentSkipListSet<PlainHttpConnection> openedConnections
             = new ConcurrentSkipListSet<>(HttpConnection.COMPARE_BY_ID);
@@ -398,6 +399,7 @@ final class HttpClientImpl extends HttpClient implements Trackable {
     private final AtomicLong pendingTCPConnectionCount = new AtomicLong();
     private final AtomicLong pendingSubscribersCount = new AtomicLong();
     private final AtomicBoolean isAlive = new AtomicBoolean();
+    private final AtomicBoolean isStarted = new AtomicBoolean();
 
     /** A Set of, deadline first, ordered timeout events. */
     private final TreeSet<TimeoutEvent> timeouts;
@@ -455,6 +457,7 @@ final class HttpClientImpl extends HttpClient implements Trackable {
         delegatingExecutor = new DelegatingExecutor(this::isSelectorThread, ex,
                 this::onSubmitFailure);
         facadeRef = new WeakReference<>(facadeFactory.createFacade(this));
+        implRef = new WeakReference<>(this);
         client2 = new Http2ClientImpl(this);
         cookieHandler = builder.cookieHandler;
         connectTimeout = builder.connectTimeout;
@@ -504,7 +507,12 @@ final class HttpClientImpl extends HttpClient implements Trackable {
     }
 
     private void start() {
-        selmgr.start();
+        try {
+            selmgr.start();
+        } catch (Throwable t) {
+            isStarted.set(true);
+            throw t;
+        }
     }
 
     // Called from the SelectorManager thread, just before exiting.
@@ -534,7 +542,14 @@ final class HttpClientImpl extends HttpClient implements Trackable {
         client.subscribers.forEach(s -> s.onError(t));
     }
 
-    public void registerSubscriber(HttpBodySubscriberWrapper<?> subscriber) {
+    /**
+     * Adds the given subscriber to the subscribers list, or call
+     * its {@linkplain HttpBodySubscriberWrapper#onError onError}
+     * method if the client is shutting down.
+     * @param subscriber the subscriber
+     * @return true if the subscriber was added to the list.
+     */
+    public boolean registerSubscriber(HttpBodySubscriberWrapper<?> subscriber) {
         if (!selmgr.isClosed()) {
             synchronized (selmgr) {
                 if (!selmgr.isClosed()) {
@@ -544,20 +559,28 @@ final class HttpClientImpl extends HttpClient implements Trackable {
                             debug.log("body subscriber registered: " + count);
                         }
                     }
-                    return;
+                    return true;
                 }
             }
         }
         subscriber.onError(selmgr.selectorClosedException());
+        return false;
     }
 
-    public void unregisterSubscriber(HttpBodySubscriberWrapper<?> subscriber) {
+    /**
+     * Remove the given subscriber from the subscribers list.
+     * @param subscriber the subscriber
+     * @return true if the subscriber was found and removed from the list.
+     */
+    public boolean unregisterSubscriber(HttpBodySubscriberWrapper<?> subscriber) {
         if (subscribers.remove(subscriber)) {
             long count = pendingSubscribersCount.decrementAndGet();
             if (debug.on()) {
                 debug.log("body subscriber unregistered: " + count);
             }
+            return true;
         }
+        return false;
     }
 
     private void closeConnection(HttpConnection conn) {
@@ -690,7 +713,7 @@ final class HttpClientImpl extends HttpClient implements Trackable {
     // Trackers are used in test to verify that an instance of
     // HttpClient has shutdown correctly, and that all operations
     // have terminated.
-    final static class HttpClientTracker implements Tracker {
+    static final class HttpClientTracker implements Tracker {
         final AtomicLong requestCount;
         final AtomicLong httpCount;
         final AtomicLong http2Count;
@@ -699,7 +722,9 @@ final class HttpClientImpl extends HttpClient implements Trackable {
         final AtomicLong connnectionsCount;
         final AtomicLong subscribersCount;
         final Reference<?> reference;
+        final Reference<?> implRef;
         final AtomicBoolean isAlive;
+        final AtomicBoolean isStarted;
         final String name;
         HttpClientTracker(AtomicLong request,
                           AtomicLong http,
@@ -709,7 +734,9 @@ final class HttpClientImpl extends HttpClient implements Trackable {
                           AtomicLong conns,
                           AtomicLong subscribers,
                           Reference<?> ref,
+                          Reference<?> implRef,
                           AtomicBoolean isAlive,
+                          AtomicBoolean isStarted,
                           String name) {
             this.requestCount = request;
             this.httpCount = http;
@@ -719,7 +746,9 @@ final class HttpClientImpl extends HttpClient implements Trackable {
             this.connnectionsCount = conns;
             this.subscribersCount = subscribers;
             this.reference = ref;
+            this.implRef = implRef;
             this.isAlive = isAlive;
+            this.isStarted = isStarted;
             this.name = name;
         }
         @Override
@@ -750,8 +779,12 @@ final class HttpClientImpl extends HttpClient implements Trackable {
         public boolean isFacadeReferenced() {
             return !reference.refersTo(null);
         }
+        public boolean isImplementationReferenced() {
+            return !implRef.refersTo(null);
+        }
+        // The selector is considered alive if it's not yet started
         @Override
-        public boolean isSelectorAlive() { return isAlive.get(); }
+        public boolean isSelectorAlive() { return isAlive.get() || !isStarted.get(); }
         @Override
         public String getName() {
             return name;
@@ -768,7 +801,9 @@ final class HttpClientImpl extends HttpClient implements Trackable {
                 pendingTCPConnectionCount,
                 pendingSubscribersCount,
                 facadeRef,
+                implRef,
                 isAlive,
+                isStarted,
                 dbgTag);
     }
 
@@ -976,7 +1011,7 @@ final class HttpClientImpl extends HttpClient implements Trackable {
     }
 
     // Main loop for this client's selector
-    private final static class SelectorManager extends Thread {
+    private static final class SelectorManager extends Thread {
 
         // For testing purposes we have an internal System property that
         // can control the frequency at which the selector manager will wake
@@ -1144,7 +1179,8 @@ final class HttpClientImpl extends HttpClient implements Trackable {
             List<Pair<AsyncEvent,IOException>> errorList = new ArrayList<>();
             List<AsyncEvent> readyList = new ArrayList<>();
             List<Runnable> resetList = new ArrayList<>();
-            owner.isAlive.set(true);
+            owner.isAlive.set(true);   // goes back to false when run exits
+            owner.isStarted.set(true); // never goes back to false
             try {
                 if (Log.channel()) Log.logChannel(getName() + ": starting");
                 while (!Thread.currentThread().isInterrupted() && !closed) {
@@ -1388,7 +1424,7 @@ final class HttpClientImpl extends HttpClient implements Trackable {
         private final SelectableChannel chan;
         private final Selector selector;
         private final Set<AsyncEvent> pending;
-        private final static Logger debug =
+        private static final Logger debug =
                 Utils.getDebugLogger("SelectorAttachment"::toString, Utils.DEBUG);
         private int interestOps;
 
